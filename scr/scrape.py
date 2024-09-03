@@ -1,46 +1,65 @@
-import asyncio
-import aiohttp
+import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 import pandas as pd
 import re
-from concurrent.futures import ProcessPoolExecutor
-import time
 
-async def fetch_html(url, session):
-    """Fetch the content of a URL asynchronously."""
+def fetch_html(url):
+    """Fetch the content of a URL with retries and backoff."""
+    session = requests.Session()
+    # Setup retry strategy
+    retries = Retry(
+        total=5,  # Total retries
+        backoff_factor=1,  # Time between retries, exponential backoff factor
+        status_forcelist=[500, 502, 503, 504, 429],  # Retry on these status codes
+    )
+    # Mount it for both http and https connections
+    session.mount('http://', HTTPAdapter(max_retries=retries))
+    session.mount('https://', HTTPAdapter(max_retries=retries))
+
     try:
-        async with session.get(url, timeout=30) as response:
-            if response.status == 200:
-                return await response.text()
-            else:
-                print(f"Error fetching {url}: HTTP {response.status}")
-                return None
-    except Exception as e:
-        print(f"Error fetching {url}: {str(e)}")
+        response = session.get(url, timeout=10)  # 10 seconds timeout for the request
+        if response.ok:
+            return BeautifulSoup(response.content, 'html.parser')
+        else:
+            response.raise_for_status()  # This will raise an error for 4XX client errors
+    except requests.RequestException as e:
+        print(f"Error fetching the URL {url}: {e}")
         return None
 
-def parse_html(html):
-    """Parse HTML content using BeautifulSoup."""
-    return BeautifulSoup(html, 'lxml') if html else None
-
-async def extract_page_count(session, url):
+def extract_page_count(soup):
     """Extract the number of pages from the pagination element."""
-    html = await fetch_html(url, session)
-    if html:
-        soup = BeautifulSoup(html, 'lxml')
-        pagination = soup.find('div', class_='pagination')
-        return int(pagination.find_all('a')[-2].text) if pagination else 1
-    return 1
+    pagination = soup.find('div', class_='pagination')
+    return int(pagination.find_all('a')[-2].text) if pagination else 1
 
-async def extract_event_links(session, base_url, page_url):
-    """Extract event links from the page."""
-    html = await fetch_html(page_url, session)
-    if html:
-        soup = BeautifulSoup(html, 'lxml')
-        return [base_url + link['href'] for link in soup.find_all('a', href=True) if 'getresultevent.php?event=' in link['href']]
-    return []
+def extract_event_links(base_url, soup):
+    """ Extract event links from the page. """
+    links = []
+    for link in soup.find_all('a', href=True):
+        href = link['href']
+        if 'getresultevent.php?event=' in href:
+            links.append(base_url + href)
+    return links
 
-async def extract_elevation_gain(soup):
+def extract_event_details(soup):
+    """Extract 'Event', 'Date', 'Finishers' and 'Distance' from the HTML content."""
+    details = {}
+    try:
+        info_rows = soup.find_all('tr')  # Find all table rows in the page
+        for row in info_rows:
+            # Look for rows where the first cell contains the labels we're interested in
+            header_cell = row.find('td')
+            if header_cell and header_cell.find('b'):  # Check for bold tags which might contain labels
+                label = header_cell.get_text(strip=True).rstrip(':')
+                value_cell = header_cell.find_next_sibling('td')  # Get the next sibling cell for the value
+                if label in ['Date', 'Event', 'Distance', 'Finishers'] and value_cell:
+                    details[label] = value_cell.get_text(strip=True)
+    except Exception as e:
+        print(f"Error extracting event details: {e}")
+    return details
+
+def extract_elevation_gain(soup):
     """Extract elevation gain from the event detail page."""
     elevation_row = soup.find('b', string=re.compile('Elevation gain/loss: '))
     if elevation_row:
@@ -49,53 +68,42 @@ async def extract_elevation_gain(soup):
             return elevation_data.text.strip()
     return 'N/A'
 
-async def extract_event_details(soup):
-    """Extract 'Event', 'Date', 'Finishers' and 'Distance' from the HTML content."""
-    details = {}
-    try:
-        info_rows = soup.find_all('tr')
-        for row in info_rows:
-            header_cell = row.find('td')
-            if header_cell and header_cell.find('b'):
-                label = header_cell.get_text(strip=True).rstrip(':')
-                value_cell = header_cell.find_next_sibling('td')
-                if label in ['Date', 'Event', 'Distance', 'Finishers'] and value_cell:
-                    details[label] = value_cell.get_text(strip=True)
-    except Exception as e:
-        print(f"Error extracting event details: {e}")
-    return details
-
-async def extract_event_id(url):
+def extract_event_id(url):
     """Extract event ID from the URL."""
     match = re.search(r'event=(\d+)', url)
     return match.group(1) if match else 'N/A'
 
-async def fetch_event_all_data(table_soup, event_details, elevation_gain, event_id):
+def fetch_event_all_data(table_soup, event_details, elevation_gain, event_id):
     """Extract data and runner IDs from the event table, including event details and elevation gain."""
     data = []
     headers = [th.text.strip() for th in table_soup.find_all('th')]
+    # Append the event details headers
     headers.extend(['Runner ID', 'Event', 'Date', 'Distance', 'Finishers', 'Winner Time', 'Elevation Gain', 'Event ID'])
-    rows = table_soup.find_all('tr')[1:]
+    rows = table_soup.find_all('tr')[1:]  # Skip header row
     winner_time = None
 
+    # Extract winners time
     for row in rows:
         cols = row.find_all('td')
         rank = int(cols[0].text.strip()) if cols[0].text.strip().isdigit() else None
+
         if rank == 1:
-            winner_time = cols[1].text.strip()
+            winner_time = cols[1].text.strip() 
             break
 
     for row in rows:
         cols = row.find_all('td')
         row_data = [col.text.strip() for col in cols]
-        link = cols[2].find('a', href=True)
+        # Get runner ID
+        link = cols[2].find('a', href=True)  # Assuming the third column has the link
         runner_id = link['href'].split('runner=')[-1] if link else 'No ID'
+        # Include event details, runner ID, elevation gain, and event ID
         row_data.extend([
-            runner_id,
-            event_details.get('Event', 'N/A'),
-            event_details.get('Date', 'N/A'),
-            event_details.get('Distance', 'N/A'),
-            event_details.get('Finishers', 'N/A'),
+            runner_id, 
+            event_details.get('Event', 'N/A'), 
+            event_details.get('Date', 'N/A'), 
+            event_details.get('Distance', 'N/A'), 
+            event_details.get('Finishers', 'N/A'), 
             winner_time or 'N/A',
             elevation_gain,
             event_id
@@ -104,87 +112,60 @@ async def fetch_event_all_data(table_soup, event_details, elevation_gain, event_
 
     return pd.DataFrame(data, columns=headers)
 
-async def process_event(session, event_link, base_url):
-    """Process a single event asynchronously."""
-    event_html = await fetch_html(event_link, session)
-    if not event_html:
-        return None
+def extract_specific_links(soup, base_url, path_starts_with):
+    """Extract specific links that start with a given path from the parsed HTML."""
+    links = []
+    if soup:
+        # Find all 'a' tags with an 'href' attribute
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            # Check if the href starts with the desired path
+            if href.startswith(path_starts_with):
+                full_link = base_url + href
+                links.append(full_link)
+    return links
 
-    event_soup = parse_html(event_html)
-    event_details = extract_event_details(event_soup)
-    table_soup = event_soup.find('table', {'id': 'Resultlist'})
+# Scraping year by year for every race
+base_url = "https://statistik.d-u-v.org/"
+start_year = 2024
+end_year = 2024
 
-    event_id = extract_event_id(event_link)
-    event_detail_url = f"{base_url}eventdetail.php?event={event_id}"
-    event_detail_html = await fetch_html(event_detail_url, session)
-    event_detail_soup = parse_html(event_detail_html)
-    elevation_gain = extract_elevation_gain(event_detail_soup) if event_detail_soup else 'N/A'
+for year in range(start_year, end_year + 1):
+    page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page=1"
+    first_page = fetch_html(page_url)
 
-    if table_soup:
-        return fetch_event_all_data(table_soup, event_details, elevation_gain, event_id)
-    return None
-
-async def scrape_year(year, base_url):
-    """Scrape data for a specific year."""
-    async with aiohttp.ClientSession() as session:
-        first_page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page=1"
-        num_pages = await extract_page_count(session, first_page_url)
-        
-        all_event_links = []
-        for page in range(1, num_pages + 1):
-            page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page={page}"
-            event_links = await extract_event_links(session, base_url, page_url)
-            all_event_links.extend(event_links)
-
-        tasks = [process_event(session, link, base_url) for link in all_event_links]
-        results = await asyncio.gather(*tasks)
-        
-        return [result for result in results if result is not None]
-
-async def scrape_year(year, base_url):
-    async with aiohttp.ClientSession() as session:
-        first_page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page=1"
-        num_pages = await extract_page_count(session, first_page_url)
+    if first_page:
+        num_pages = extract_page_count(first_page)
         all_data = []
 
         for page in range(1, num_pages + 1):
             page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page={page}"
-            print(f"Processing year {year}, page {page}")
-            event_links = await extract_event_links(session, base_url, page_url)
-            for event_link in event_links:
-                event_html = await fetch_html(event_link, session)
-                if event_html:
-                    event_soup = BeautifulSoup(event_html, 'lxml')
-                    event_details = await extract_event_details(event_soup)
-                    table_soup = event_soup.find('table', {'id': 'Resultlist'})
-                    event_id = await extract_event_id(event_link)
-                    event_detail_url = f"{base_url}eventdetail.php?event={event_id}"
-                    event_detail_html = await fetch_html(event_detail_url, session)
-                    elevation_gain = await extract_elevation_gain(BeautifulSoup(event_detail_html, 'lxml')) if event_detail_html else 'N/A'
-                    if table_soup:
-                        event_data = await fetch_event_all_data(table_soup, event_details, elevation_gain, event_id)
-                        if not event_data.empty:
-                            all_data.append(event_data)
-
+            print(page_url)
+            page_soup = fetch_html(page_url)
+            if page_soup:
+                event_links = extract_event_links(base_url, page_soup)
+                for event_link in event_links:
+                    event_page = fetch_html(event_link)
+                    if event_page:
+                        event_details = extract_event_details(event_page)
+                        table_soup = event_page.find('table', {'id': 'Resultlist'})
+                        
+                        # Extract event ID
+                        event_id = extract_event_id(event_link)
+                        
+                        # Fetch elevation gain from event detail page
+                        event_detail_url = f"{base_url}eventdetail.php?event={event_id}"
+                        event_detail_page = fetch_html(event_detail_url)
+                        elevation_gain = extract_elevation_gain(event_detail_page) if event_detail_page else 'N/A'
+                        
+                        if table_soup:
+                            event_data = fetch_event_all_data(table_soup, event_details, elevation_gain, event_id)
+                            if not event_data.empty:
+                                all_data.append(event_data)
+        
         if all_data:
             final_df = pd.concat(all_data, ignore_index=True)
             final_df.to_csv(f'./output/all_events_data_{year}.csv', index=False)
             print(f"Saved all event data for {year} to 'all_events_data_{year}.csv'.")
         else:
             print(f"No data was extracted for {year}.")
-
-async def main():
-    base_url = "https://statistik.d-u-v.org/"
-    start_year = 2020
-    end_year = 2023
-    
-    start_time = time.time()
-    
-    tasks = [scrape_year(year, base_url) for year in range(start_year, end_year + 1)]
-    await asyncio.gather(*tasks)
-    
-    end_time = time.time()
-    print(f"Total execution time: {end_time - start_time:.2f} seconds")
-
-if __name__ == "__main__":
-    asyncio.run(main())
