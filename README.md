@@ -28,3 +28,5 @@ The columns per results table can differ slightly, depending on the type of even
 - Event ID
 - "Surnamefirst name"
 - hours
+
+scrape_async.py scrapes multiple years in parallel using asyncio, whilst scrape.py goes through the scraping linearly
