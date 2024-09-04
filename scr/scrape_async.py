@@ -125,23 +125,6 @@ async def process_event(session, event_link, base_url):
     return None
 
 async def scrape_year(year, base_url):
-    """Scrape data for a specific year."""
-    async with aiohttp.ClientSession() as session:
-        first_page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page=1"
-        num_pages = await extract_page_count(session, first_page_url)
-        
-        all_event_links = []
-        for page in range(1, num_pages + 1):
-            page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page={page}"
-            event_links = await extract_event_links(session, base_url, page_url)
-            all_event_links.extend(event_links)
-
-        tasks = [process_event(session, link, base_url) for link in all_event_links]
-        results = await asyncio.gather(*tasks)
-        
-        return [result for result in results if result is not None]
-
-async def scrape_year(year, base_url):
     async with aiohttp.ClientSession() as session:
         first_page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page=1"
         num_pages = await extract_page_count(session, first_page_url)
@@ -168,6 +151,7 @@ async def scrape_year(year, base_url):
 
         if all_data:
             final_df = pd.concat(all_data, ignore_index=True)
+            final_df.drop_duplicates(subset=['Event ID', 'Runner ID'], keep='first', inplace=True)
             final_df.to_csv(f'./output/all_events_data_{year}.csv', index=False)
             print(f"Saved all event data for {year} to 'all_events_data_{year}.csv'.")
         else:
@@ -175,8 +159,8 @@ async def scrape_year(year, base_url):
 
 async def main():
     base_url = "https://statistik.d-u-v.org/"
-    start_year = 2015
-    end_year = 2019
+    start_year = 2023
+    end_year = 2024
     
     start_time = time.time()
     
