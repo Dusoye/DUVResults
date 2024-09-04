@@ -5,19 +5,29 @@ import pandas as pd
 import re
 from concurrent.futures import ProcessPoolExecutor
 import time
+from aiohttp import ClientConnectorError, ServerDisconnectedError, ClientOSError
 
-async def fetch_html(url, session):
-    """Fetch the content of a URL asynchronously."""
-    try:
-        async with session.get(url, timeout=30) as response:
-            if response.status == 200:
-                return await response.text()
-            else:
-                print(f"Error fetching {url}: HTTP {response.status}")
-                return None
-    except Exception as e:
-        print(f"Error fetching {url}: {str(e)}")
-        return None
+async def fetch_html(url, session, max_retries=3, delay=5):
+    """Fetch the content of a URL asynchronously with retries."""
+    for attempt in range(max_retries):
+        try:
+            async with session.get(url, timeout=30) as response:
+                if response.status == 200:
+                    return await response.text()
+                else:
+                    print(f"Attempt {attempt + 1}: Error fetching {url}: HTTP {response.status}")
+        except (ClientConnectorError, ServerDisconnectedError, ClientOSError, asyncio.TimeoutError) as e:
+            print(f"Attempt {attempt + 1}: Error fetching {url}: {str(e)}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+            continue
+        except Exception as e:
+            print(f"Unexpected error fetching {url}: {str(e)}")
+            break
+    
+    print(f"Failed to fetch {url} after {max_retries} attempts")
+    return None
 
 def parse_html(html):
     """Parse HTML content using BeautifulSoup."""
@@ -150,8 +160,8 @@ async def scrape_year(year, base_url):
 
 async def main():
     base_url = "https://statistik.d-u-v.org/"
-    start_year = 2020
-    end_year = 2024
+    start_year = 2015
+    end_year = 2019
     
     start_time = time.time()
     
