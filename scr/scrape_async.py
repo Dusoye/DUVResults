@@ -104,50 +104,41 @@ async def fetch_event_all_data(table_soup, event_details, elevation_gain, event_
 
     return pd.DataFrame(data, columns=headers)
 
-async def process_event(session, event_link, base_url):
-    """Process a single event asynchronously."""
-    event_html = await fetch_html(event_link, session)
-    if not event_html:
-        return None
-
-    event_soup = parse_html(event_html)
-    event_details = extract_event_details(event_soup)
-    table_soup = event_soup.find('table', {'id': 'Resultlist'})
-
-    event_id = extract_event_id(event_link)
-    event_detail_url = f"{base_url}eventdetail.php?event={event_id}"
-    event_detail_html = await fetch_html(event_detail_url, session)
-    event_detail_soup = parse_html(event_detail_html)
-    elevation_gain = extract_elevation_gain(event_detail_soup) if event_detail_soup else 'N/A'
-
-    if table_soup:
-        return fetch_event_all_data(table_soup, event_details, elevation_gain, event_id)
-    return None
-
 async def scrape_year(year, base_url):
     async with aiohttp.ClientSession() as session:
         first_page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page=1"
         num_pages = await extract_page_count(session, first_page_url)
         all_data = []
+        processed_event_ids = set()
 
         for page in range(1, num_pages + 1):
             page_url = f"{base_url}geteventlist.php?year={year}&dist=all&country=all&surface=all&sort=1&page={page}"
             print(f"Processing year {year}, page {page}")
             event_links = await extract_event_links(session, base_url, page_url)
+            
             for event_link in event_links:
-                event_html = await fetch_html(event_link, session)
-                if event_html:
-                    event_soup = BeautifulSoup(event_html, 'lxml')
-                    event_details = await extract_event_details(event_soup)
-                    table_soup = event_soup.find('table', {'id': 'Resultlist'})
-                    event_id = await extract_event_id(event_link)
-                    event_detail_url = f"{base_url}eventdetail.php?event={event_id}"
-                    event_detail_html = await fetch_html(event_detail_url, session)
-                    elevation_gain = await extract_elevation_gain(BeautifulSoup(event_detail_html, 'lxml')) if event_detail_html else 'N/A'
-                    if table_soup:
-                        event_data = await fetch_event_all_data(table_soup, event_details, elevation_gain, event_id)
-                        if not event_data.empty:
-                            all_data.append(event_data)
+                event_id = await extract_event_id(event_link)
+                if event_id not in processed_event_ids:
+                    processed_event_ids.add(event_id)
+                    
+                    # Process the event
+                    event_html = await fetch_html(event_link, session)
+                    if event_html:
+                        event_soup = parse_html(event_html)
+                        event_details = await extract_event_details(event_soup)
+                        table_soup = event_soup.find('table', {'id': 'Resultlist'})
+
+                        event_detail_url = f"{base_url}eventdetail.php?event={event_id}"
+                        event_detail_html = await fetch_html(event_detail_url, session)
+                        event_detail_soup = parse_html(event_detail_html)
+                        elevation_gain = await extract_elevation_gain(event_detail_soup) if event_detail_soup else 'N/A'
+
+                        if table_soup:
+                            event_data = await fetch_event_all_data(table_soup, event_details, elevation_gain, event_id)
+                            if not event_data.empty:
+                                all_data.append(event_data)
+                    
+                    # await asyncio.sleep(1)
 
         if all_data:
             final_df = pd.concat(all_data, ignore_index=True)
@@ -159,7 +150,7 @@ async def scrape_year(year, base_url):
 
 async def main():
     base_url = "https://statistik.d-u-v.org/"
-    start_year = 2023
+    start_year = 2020
     end_year = 2024
     
     start_time = time.time()
