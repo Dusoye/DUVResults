@@ -3,7 +3,6 @@ import aiohttp
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
-from concurrent.futures import ProcessPoolExecutor
 import time
 from aiohttp import ClientConnectorError, ServerDisconnectedError, ClientOSError
 
@@ -160,8 +159,8 @@ async def scrape_year(year, base_url):
 
 async def main():
     base_url = "https://statistik.d-u-v.org/"
-    start_year = 2015
-    end_year = 2019
+    start_year = 2005
+    end_year = 2009
     
     start_time = time.time()
     
