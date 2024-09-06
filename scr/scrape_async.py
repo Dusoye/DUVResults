@@ -38,8 +38,24 @@ async def extract_page_count(session, url):
     if html:
         soup = BeautifulSoup(html, 'lxml')
         pagination = soup.find('div', class_='pagination')
-        return int(pagination.find_all('a')[-2].text) if pagination else 1
-    return 1
+        if pagination:
+            # Check if there are page numbers
+            page_links = pagination.find_all('a', href=True)
+            if page_links:
+                # If there are multiple pages, get the second-to-last number
+                try:
+                    return int(page_links[-2].text)
+                except (ValueError, IndexError):
+                    # If we can't parse the second-to-last link, assume there's only one page
+                    return 1
+            else:
+                # If there are no page links, it's a single page
+                return 1
+        else:
+            # If there's no pagination div, assume it's a single page
+            return 1
+    return 1  # Default to 1 if we couldn't fetch the page
+
 
 async def extract_event_links(session, base_url, page_url):
     """Extract event links from the page."""
@@ -159,8 +175,8 @@ async def scrape_year(year, base_url):
 
 async def main():
     base_url = "https://statistik.d-u-v.org/"
-    start_year = 2005
-    end_year = 2009
+    start_year = 1990
+    end_year = 1999
     
     start_time = time.time()
     
