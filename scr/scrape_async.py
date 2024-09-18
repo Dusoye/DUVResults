@@ -175,8 +175,8 @@ async def scrape_year(year, base_url):
 
 async def main():
     base_url = "https://statistik.d-u-v.org/"
-    start_year = 1990
-    end_year = 1999
+    start_year = 2024
+    end_year = 2024
     
     start_time = time.time()
     
