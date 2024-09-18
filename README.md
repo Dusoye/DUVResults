@@ -29,4 +29,42 @@ The columns per results table can differ slightly, depending on the type of even
 - "Surnamefirst name"
 - hours
 
-scrape_async.py scrapes multiple years in parallel using asyncio, whilst scrape.py goes through the scraping linearly
+scrape_async.py scrapes multiple years in parallel using asyncio, whilst scrape.py goes through the scraping linearly.
+
+The Clean data notebook cleans and engineers some features for the dataset, resulting in the following columns:
+
+- Runner ID: Unique identifier for each runner
+- First Name: Runner's first name
+- Surname: Runner's last name
+- Nat.: Nationality of the runner
+- M/F: Gender of the runner (Male/Female)
+- Age: Age of the runner at the time of the race
+- Age Group: Categorized age group of the runner (e.g., 20-29, 30-39, etc.)
+- Cat: Race category the runner competed in
+- YOB: Year of Birth of the runner
+- Race Count: Number of races the runner has participated in (including the current race)
+- Cumulative Distance KM: Total distance in kilometers the runner has raced up to and including the current race
+- Avg Winner Percentage: Average of the runner's performance relative to the winner across all their races
+- Event ID: Unique identifier for each race event
+- Event: Name of the race event
+- Event Type: Type of race (Distance or Time based)
+- Date: Date of the race
+- Race Location: Location where the race took place
+- Elevation Gain: Total elevation gain of the race course in meters
+- Elevation Gain per KM: Average elevation gain per kilometer for the race
+- Finishers: String representation of total finishers, including breakdown by gender
+- Total Finishers: Total number of runners who completed the race
+- Male Finishers: Number of male runners who completed the race
+- Female Finishers: Number of female runners who completed the race
+- Rank: Overall finishing position of the runner in the race
+- Rank M/F: Finishing position of the runner within their gender category
+- Cat. Rank: Finishing position of the runner within their specific race category
+- Finish Percentage: Runner's finishing position as a percentage of total finishers
+- Winner Percentage: Runner's performance as a percentage relative to the winner's performance
+- Distance/Time: The set distance or time for the race
+- Distance KM: Race distance in kilometers
+- Terrain: Type of terrain for the race (e.g., trail, road, track)
+- Time Seconds Finish: Runner's finishing time in seconds
+- Distance Finish: Distance covered by the runner in time-based races
+- Average Speed: Runner's average speed in meters per second
+- Avg.Speed km/h: Runner's average speed in kilometers per hour
