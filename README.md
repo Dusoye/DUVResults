@@ -42,8 +42,8 @@ The Clean data notebook cleans and engineers some features for the dataset, resu
 - Age Group: Categorized age group of the runner (e.g., 20-29, 30-39, etc.)
 - Cat: Race category the runner competed in
 - YOB: Year of Birth of the runner
-- Race Count: Number of races the runner has participated in (including the current race)
-- Cumulative Distance KM: Total distance in kilometers the runner has raced up to and including the current race
+- Race Count: Number of races the runner has participated in
+- Cumulative Distance KM: Total distance in kilometers the runner has raced up to
 - Avg Winner Percentage: Average of the runner's performance relative to the winner across all their races
 - Event ID: Unique identifier for each race event
 - Event: Name of the race event
@@ -52,7 +52,6 @@ The Clean data notebook cleans and engineers some features for the dataset, resu
 - Race Location: Location where the race took place
 - Elevation Gain: Total elevation gain of the race course in meters
 - Elevation Gain per KM: Average elevation gain per kilometer for the race
-- Finishers: String representation of total finishers, including breakdown by gender
 - Total Finishers: Total number of runners who completed the race
 - Male Finishers: Number of male runners who completed the race
 - Female Finishers: Number of female runners who completed the race
