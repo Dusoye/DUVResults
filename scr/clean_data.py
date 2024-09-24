@@ -47,46 +47,93 @@ def split_runner_name(data):
     
     return data
 
-def parse_performance(data, column_name, time_column, distance_column):
-    time_regex = re.compile(r'(?:(\d+)d )?(\d{1,2}):(\d{2}):(\d{2}) h')
-    distance_regex = re.compile(r'(\d+\.?\d*) km')
+def parse_entry(entry):
+    if pd.isna(entry):
+        return np.nan, np.nan
     
-    def parse_entry(entry):
-        if 'km' in entry:
-            match = distance_regex.search(entry)
-            return (None, float(match.group(1)) if match else None)
+    # Convert to string if it's not already
+    entry = str(entry)
+    
+    if 'km' in entry:
+        parts = entry.split()
+        if len(parts) >= 2:
+            time_str = parts[0]
+            distance = float(parts[1].replace('km', ''))
         else:
-            match = time_regex.search(entry)
-            if match:
-                days, hours, minutes, seconds = match.groups(default='0')
-                total_seconds = timedelta(days=int(days), hours=int(hours), minutes=int(minutes), seconds=int(seconds)).total_seconds()
-                return (total_seconds, None)
-        return (None, None)
+            return np.nan, np.nan
+    else:
+        time_str = entry
+        distance = np.nan
     
-    data[time_column], data[distance_column] = zip(*data[column_name].apply(parse_entry))
+    # Parse time
+    time_parts = time_str.split(':')
+    if len(time_parts) == 3:
+        hours, minutes, seconds = map(float, time_parts)
+    elif len(time_parts) == 2:
+        hours = 0
+        minutes, seconds = map(float, time_parts)
+    else:
+        return np.nan, np.nan
+    
+    total_seconds = hours * 3600 + minutes * 60 + seconds
+    
+    return total_seconds, distance
+
+def parse_performance(data, column_name, time_column, distance_column):
+    data[[time_column, distance_column]] = data[column_name].apply(parse_entry).apply(pd.Series)
     return data
 
 def split_distance_column(df):
-    distance_pattern = re.compile(r'(\d+\.?\d*)\s*(km|mi|h)')
-    race_type_pattern = re.compile(r'(\d+\.?\d*\s*(km|mi|h))\s*(.*)')
+    # Updated patterns to handle more unit variations
+    distance_pattern = re.compile(r'(\d+(?:\.\d*)?)\s*\.?\s*(km|k|mi|m|mile|miles|h|d)', re.IGNORECASE)
+    race_type_pattern = re.compile(r'(\d+(?:\.\d*)?)\s*\.?\s*(km|k|mi|m|mile|miles|h|d)\s*(.*)', re.IGNORECASE)
+    
+    def standardize_unit(unit):
+        unit = unit.lower()
+        if unit in ['k', 'km']:
+            return 'km'
+        elif unit in ['m', 'mi', 'mile', 'miles']:
+            return 'mi'
+        else:
+            return unit  # 'h' and 'd' remain unchanged
     
     def split_distance(entry):
+        if pd.isna(entry):
+            return None, None, None
+        
+        # Convert to string if it's not already
+        entry = str(entry)
+        
         distance_match = distance_pattern.search(entry)
         race_type_match = race_type_pattern.search(entry)
         
         if distance_match:
-            distance = distance_match.group(0)
-            unit = distance_match.group(2)
-            race_type = 'Time' if unit == 'h' else 'Distance'
+            # Clean up the distance format
+            distance_value = distance_match.group(1).rstrip('.')
+            unit = standardize_unit(distance_match.group(2))
+            distance = f"{distance_value}{unit}"
+            
+            # Update race_type logic
+            if unit == 'h':
+                race_type = 'Time'
+            elif unit == 'd':
+                race_type = 'Multi-day'
+            else:
+                race_type = 'Distance'
         else:
             distance = None
             race_type = None
         
-        terrain = race_type_match.group(3).strip() if race_type_match and len(race_type_match.groups()) > 2 else None
+        # Extract terrain
+        if race_type_match:
+            terrain_start = race_type_match.end(2)
+            terrain = entry[terrain_start:].strip()
+        else:
+            terrain = None
         
         return distance, terrain, race_type
     
-    df['Distance/Time'], df['Terrain'], df['Event Type'] = zip(*df['Distance'].apply(split_distance))
+    df[['Distance/Time', 'Terrain', 'Event Type']] = df['Distance'].apply(split_distance).apply(pd.Series)
     return df
 
 def convert_miles_to_km(entry):
@@ -266,26 +313,42 @@ def clean_data(df):
 
     return df
 
-def main(input_folder, output_file):
-    result_df = load_and_concat_csv(input_folder, chunksize=100000)
-    df_clean = clean_data(result_df)
+def main(input_folder, output_dir):
+    all_files = glob.glob(os.path.join(input_folder, "all_events_data_*.csv"))
+    
+    for file_path in all_files:
+        year = re.search(r'all_events_data_(\d{4})\.csv', os.path.basename(file_path))
+        if year:
+            year = year.group(1)
+            print(f"Processing data for year {year}")
+            
+            result_df = pd.read_csv(file_path, low_memory=False)
+            df_clean = clean_data(result_df)
 
-    columns_to_keep = ['Runner ID','First Name','Surname','Nat.','Gender','Age','Age Group','Cat','YOB',
-                       'Race Count','Cumulative Distance KM',
-                       'Event ID','Event','Event Type','Date','Race Location','Elevation Gain','Elevation Gain per KM',
-                       'Total Finishers','Male Finishers','Female Finishers',
-                       'Rank','Rank M/F','Cat. Rank','Finish Percentage','Winner Percentage',
-                       'Distance/Time','Distance KM','Terrain',
-                       'Time Seconds Finish','Distance Finish','Average Speed','Avg.Speed km/h']
-    df_clean = df_clean[columns_to_keep]
+            columns_to_keep = ['Runner ID','First Name','Surname','Nat.','Gender','Age','Age Group','Cat','YOB',
+                               'Race Count','Cumulative Distance KM',
+                               'Event ID','Event','Event Type','Date','Race Location','Elevation Gain','Elevation Gain per KM',
+                               'Total Finishers','Male Finishers','Female Finishers',
+                               'Rank','Rank M/F','Cat. Rank','Finish Percentage','Winner Percentage',
+                               'Distance/Time','Distance KM','Terrain',
+                               'Time Seconds Finish','Distance Finish','Average Speed','Avg.Speed km/h']
+            df_clean = df_clean[columns_to_keep]
 
-    df_clean.to_csv(output_file, index=False)
-    print(f"Processed data saved to {output_file}")
+            # Create output directory if it doesn't exist
+            os.makedirs(output_dir, exist_ok=True)
+            
+            output_file = os.path.join(output_dir, f"processed_data_{year}.csv")
+            df_clean.to_csv(output_file, index=False)
+            print(f"Processed data for year {year} saved to {output_file}")
+        else:
+            print(f"Skipping file {file_path} as it doesn't match the expected naming pattern.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process CSV files from a folder.")
+    parser = argparse.ArgumentParser(description="Process CSV files from a folder and save output by year.")
     parser.add_argument("input_folder", help="Path to the folder containing CSV files")
-    parser.add_argument("--output", default="processed_data.csv", help="Output file name (default: processed_data.csv)")
+    parser.add_argument("--output_dir", default="processed_data", help="Output directory for processed files (default: processed_data)")
     args = parser.parse_args()
 
-    main(args.input_folder, args.output)
+    main(args.input_folder, args.output_dir)
+
+# python scr/clean_data.py /output --output_dir /output/cleaned
